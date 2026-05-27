@@ -6,6 +6,11 @@ from functools import wraps
 import requests
 
 app = Flask(__name__)
+
+@app.after_request
+def add_header(response):
+    response.headers["Content-Type"] = "text/html; charset=utf-8"
+    return response
 app.secret_key = "tradevision-key-2026"
 
 # STEALTH MODE: Prevents rate-limiting
