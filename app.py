@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory
 import os
 import yfinance as yf
 import pandas as pd
 from functools import wraps
 import requests
+from src.utils.db_utils import get_signals
 
 app = Flask(__name__)
 
@@ -26,10 +27,48 @@ def require_access_key(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# Route to serve reports
+@app.route('/reports/<path:filename>')
+@require_access_key
+def serve_report(filename):
+    report_dir = os.path.join(app.root_path, 'final_reports')
+    return send_from_directory(report_dir, filename)
+
 @app.route("/")
 @require_access_key
 def dashboard():
-    return render_template("index.html")
+    # Fetch real signals from DB
+    signals = get_signals()
+    
+    # Format signals for the template (it expects 'reports' with specific keys)
+    reports = []
+    for s in signals[:10]: # Top 10 signals
+        reports.append({
+            "ticker": s.get("ticker"),
+            "verdict": s.get("verdict"),
+            "score": s.get("hc_score"),
+            "date": s.get("timestamp").split(" ")[0] if s.get("timestamp") else "N/A",
+            "price": s.get("price"),
+            "status": s.get("status"),
+            "filename": f"{s.get('ticker')}_report.html"
+        })
+
+    # Provide necessary context for index.html
+    context = {
+        "pulse": [
+            {"ticker": "SPY", "price": "520.45", "percent": 0.85},
+            {"ticker": "QQQ", "price": "445.12", "percent": 1.20},
+            {"ticker": "DIA", "price": "390.10", "percent": -0.15},
+            {"ticker": "VIX", "price": "13.45", "percent": -4.20}
+        ],
+        "health": {
+            "status": "Operational",
+            "color": "emerald",
+            "last_updated": "Just now"
+        },
+        "reports": reports
+    }
+    return render_template("index.html", **context)
 
 @app.route("/analyze", methods=["POST"])
 @require_access_key
