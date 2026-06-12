@@ -27,146 +27,117 @@ class ScoringEngine:
 
     def calculate_hc_score(self, fundamentals, technicals, analyst_consensus):
         """
-        Calculate the Retailer High-Conviction Score (0-100) based on high_conviction_logic.md
+        Calculate the Retailer High-Conviction Score (0-100) based on retailer_high_conviction_logic.md
         """
         score = 0
         details = {}
         
-        # 1. Fundamentals: Net Margin (Max 15 pts)
+        # 1. Moat: Net Margin (Max 20 pts)
         margin = fundamentals.get('net_margin')
         if margin is not None:
-            if margin > 0.30: s = 15
-            elif margin > 0.20: s = 10
+            if margin > 0.40: s = 20
+            elif margin >= 0.30: s = 15
+            elif margin >= 0.25: s = 10
             else: s = 0
             score += s
             details['moat'] = s
             
-        # 2. Fundamentals: FCF Growth (Max 15 pts)
-        fcf_growth = fundamentals.get('fcf_growth')
-        if fcf_growth is not None:
-            if fcf_growth > 0.20: s = 15
-            elif fcf_growth > 0.10: s = 10
+        # 2. Debt: D/E Ratio (Max 20 pts)
+        de = fundamentals.get('debt_to_equity')
+        if de is not None:
+            # yfinance D/E can be in percentage (e.g., 20 means 0.2) or ratio.
+            # Assuming if > 5, it's a percentage.
+            de_ratio = de / 100.0 if de > 5 else de
+            if de_ratio < 0.2: s = 20
+            elif de_ratio <= 0.4: s = 15
+            elif de_ratio <= 0.5: s = 10
             else: s = 0
             score += s
-            details['fcf_growth_score'] = s
-        else:
-            # Fallback to revenue growth
-            rev_growth = fundamentals.get('revenue_growth')
-            if rev_growth is not None:
-                if rev_growth > 0.20: s = 10 # lower points for fallback
-                elif rev_growth > 0.10: s = 5
-                else: s = 0
-                score += s
-                details['growth_fallback'] = s
+            details['debt'] = s
 
         # 3. Institutions: Ownership % (Max 20 pts)
         inst = fundamentals.get('institutional_ownership')
         if inst is not None:
-            if inst > 0.80: s = 20
-            elif inst > 0.70: s = 15
-            elif inst > 0.60: s = 10
+            if inst > 0.85: s = 20
+            elif inst >= 0.75: s = 15
+            elif inst >= 0.70: s = 10
             else: s = 0
             score += s
             details['institutions'] = s
             
-        # 4. Technicals: Trend & Flow (Max 20 pts)
+        # 4. Trend: Strength (Max 20 pts)
         price = technicals.get('price')
         sma20 = technicals.get('sma20')
         sma50 = technicals.get('sma50')
         sma200 = technicals.get('sma200')
-        mfi = technicals.get('mfi')
-        macd = technicals.get('macd')
-        macd_signal = technicals.get('macd_signal')
         
         tech_pts = 0
-        # Trend Alignment (Max 10 pts)
-        if price and sma50 and sma200:
-            if sma20 and price > sma20 > sma50 > sma200:
-                tech_pts += 10
-            elif price > sma50 > sma200:
-                tech_pts += 7
-            elif price > sma200:
-                tech_pts += 5
-        
-        # Institutional Flow (Max 5 pts)
-        if mfi and mfi > 60:
-            tech_pts += 5
-        elif mfi and mfi > 50:
-            tech_pts += 3
-            
-        # MACD Confirmation (Max 5 pts)
-        if macd is not None and macd_signal is not None:
-            if macd > macd_signal:
-                tech_pts += 5
-                
+        if price and sma20 and sma50 and sma200:
+            if price > sma20 > sma50 > sma200:
+                tech_pts = 20
+            else:
+                tech_pts = 0
         score += tech_pts
-        details['technical_flow'] = tech_pts
+        details['trend'] = tech_pts
             
-        # 5. Consensus: Buy/Strong Buy% (Max 20 pts)
+        # 5. Consensus: Rating % (Max 20 pts)
         # yfinance recommendation_mean: 1.0 is Strong Buy, 5.0 is Strong Sell
+        # Spec says: 100% Buy (20 pts), 95-99% (15 pts), 90-95% (10 pts)
+        # We'll proxy this with recommendation_mean.
         mean = analyst_consensus.get('recommendation_mean')
         if mean is not None:
-            if mean <= 1.2: s = 20 # >95% Buy proxy
-            elif mean <= 1.5: s = 15 # 90-95% Buy proxy
-            elif mean <= 2.1: s = 10 # 80-90% Buy proxy
+            if mean <= 1.1: s = 20 # Proxy for 100% Buy
+            elif mean <= 1.3: s = 15 # Proxy for 95-99%
+            elif mean <= 1.5: s = 10 # Proxy for 90-95%
             else: s = 0
             score += s
             details['consensus'] = s
-            
-        # 6. Value/Upside: Price Target (Max 10 pts)
-        target = analyst_consensus.get('target_mean_price')
-        if target and price:
-            upside = (target - price) / price
-            if upside > 0.20: s = 10
-            elif upside > 0.10: s = 5
-            else: s = 0
-            score += s
-            details['upside'] = s
             
         return score, details
 
     def check_hc_hard_filters(self, fundamentals, technicals, analyst_consensus):
         """
-        Check hard filters for High-Conviction status.
+        Check hard filters for High-Conviction status based on retailer_high_conviction_logic.md
         """
         fails = []
+        
+        # A. Massive Financial Moat
         margin = fundamentals.get('net_margin')
-        if margin is None or margin <= 0.25: fails.append("Net Margin < 25%")
+        if margin is None or margin <= 0.25: 
+            fails.append("Net Margin < 25%")
         
-        # Use available growth metrics as proxy for FCF growth if unavailable
         fcf_growth = fundamentals.get('fcf_growth')
-        growth_proxy = fcf_growth
-        if growth_proxy is None:
-            # Try earnings growth from fundamentals dict (I need to add it there)
-            # Actually, let's just assume we check what we have.
-            pass
-            
-        if fcf_growth is not None:
-             if fcf_growth <= 0.15: fails.append("FCF Growth < 15%")
-        else:
-             # Fallback to revenue growth for the check if FCF growth is missing
-             rev_growth = fundamentals.get('revenue_growth')
-             if rev_growth is None or rev_growth <= 0.10: # Be slightly more lenient on rev growth
-                 fails.append("Growth metrics (FCF/Rev) insufficient or unavailable")
+        if fcf_growth is None or fcf_growth <= 0.15:
+            fails.append("FCF Growth < 15%")
         
+        # B. Fortress Balance Sheet
         de = fundamentals.get('debt_to_equity')
-        if de is None or de >= 50: fails.append("D/E Ratio > 0.5")
+        if de is not None:
+            de_ratio = de / 100.0 if de > 5 else de
+            if de_ratio >= 0.5:
+                fails.append("D/E Ratio >= 0.5")
+        else:
+            fails.append("D/E Ratio unavailable")
         
         cr = fundamentals.get('current_ratio')
-        if cr is None or cr <= 1.5: fails.append("Current Ratio < 1.5")
+        if cr is None or cr <= 1.5:
+            fails.append("Current Ratio < 1.5")
         
+        # C. Big Money Backing
         inst = fundamentals.get('institutional_ownership')
-        if inst is None or inst <= 0.70: fails.append("Institutional Ownership < 70%")
+        if inst is None or inst <= 0.70:
+            fails.append("Institutional Ownership < 70%")
         
+        # D. Confirmed Uptrend
         price = technicals.get('price')
-        sma20 = technicals.get('sma20')
         sma50 = technicals.get('sma50')
         sma200 = technicals.get('sma200')
-        if price is None or sma20 is None or sma50 is None or sma200 is None or not (price > sma20 > sma50 > sma200):
-            fails.append("Not in 'Perfect Alignment' (Price > 20 SMA > 50 SMA > 200 SMA)")
+        if price is None or sma50 is None or sma200 is None or not (price > sma50 > sma200):
+            fails.append("Trend Alignment Fail (Price > 50 SMA > 200 SMA)")
             
+        # E. Absolute Wall Street Consensus
         mean = analyst_consensus.get('recommendation_mean')
-        if mean is None or mean > 2.1: 
+        if mean is None or mean > 1.5: # Proxy for 90% Buy
             fails.append("Analyst Consensus < 90% Buy")
             
         return len(fails) == 0, fails
@@ -368,86 +339,116 @@ class ScoringEngine:
             
         return len(triggers) >= 3, triggers
 
+    def check_vulture_entry_requirements(self, fundamentals, technicals, info):
+        """
+        Check if all requirements for Vulture Entry are met based on panic_vulture_logic.md
+        """
+        fails = []
+        
+        # 1. Momentum: RSI < 20
+        rsi = technicals.get('rsi')
+        if rsi is None or rsi >= 20:
+            fails.append("RSI (14) >= 20")
+            
+        # 2. Valuation: Historical P/E Range (Bottom 5%)
+        # Proxy: yfinance doesn't provide 10yr range easily. We check if trailingPE is very low (< 8)
+        pe = info.get('trailingPE')
+        if pe is None or pe > 12: 
+            fails.append("Valuation not in extreme low range (PE > 12)")
+            
+        # 3. Liquidity: Current Ratio > 1.2
+        cr = fundamentals.get('current_ratio')
+        if cr is None or cr <= 1.2:
+            fails.append("Current Ratio <= 1.2")
+            
+        # 4. Solvency: Altman Z-Score > 1.8
+        z = self._estimate_z_score(fundamentals)
+        if z <= 1.8:
+            fails.append(f"Altman Z-Score <= 1.8 (Value: {round(z, 2)})")
+            
+        # 5. Cash Flow: FCF Yield > 5%
+        fcf = fundamentals.get('free_cash_flow')
+        mcap = fundamentals.get('market_cap')
+        if fcf and mcap:
+            yield_val = fcf / mcap
+            if yield_val <= 0.05:
+                fails.append(f"FCF Yield <= 5% (Value: {round(yield_val*100, 2)}%)")
+        else:
+             fails.append("FCF Yield unavailable")
+             
+        # 6. Price Action: Volume Exhaustion (Hammer/Doji)
+        if not technicals.get('volume_exhaustion'):
+            fails.append("No Volume Exhaustion candle detected")
+            
+        return len(fails) == 0, fails
+
     def calculate_vulture_score(self, fundamentals, technicals):
         """
-        Calculate the Vulture Confidence Score (0-100).
+        Calculate the Vulture Confidence Score (0-100) based on panic_vulture_logic.md
         - 60% Financial Floor: (Z-Score, FCF Yield, Current Ratio)
         - 40% Capitulation Intensity: (RSI, RVOL, Distance from 50 SMA)
         """
         # Financial Floor (60%)
-        # Current Ratio > 1.2
         cr = fundamentals.get('current_ratio')
         cr_score = 0
         if cr:
-            if cr > 1.2: cr_score = 100
-            elif cr > 1.0: cr_score = 50
+            if cr > 1.5: cr_score = 100
+            elif cr > 1.2: cr_score = 70
+            elif cr > 1.0: cr_score = 40
         
-        # FCF Yield > 5%
         fcf = fundamentals.get('free_cash_flow')
         mcap = fundamentals.get('market_cap')
         fcf_yield_score = 0
         fcf_yield = None
         if fcf and mcap:
             fcf_yield = fcf / mcap
-            if fcf_yield > 0.05: fcf_yield_score = 100
-            elif fcf_yield > 0.02: fcf_yield_score = 50
+            if fcf_yield > 0.08: fcf_yield_score = 100
+            elif fcf_yield > 0.05: fcf_yield_score = 70
+            elif fcf_yield > 0.02: fcf_yield_score = 40
             
-        # Altman Z-Score > 1.8
-        # Z = 1.2(Working Capital / Total Assets) + 1.4(Retained Earnings / Total Assets) 
-        # + 3.3(EBIT / Total Assets) + 0.6(Market Cap / Total Liabilities) + 1.0(Sales / Total Assets)
-        # We'll use a simplified proxy if fields are missing
         z_score_val = self._estimate_z_score(fundamentals)
         z_score_status = 0
-        if z_score_val > 1.8: z_score_status = 100
-        elif z_score_val > 1.2: z_score_status = 50
+        if z_score_val > 3.0: z_score_status = 100
+        elif z_score_val > 1.8: z_score_status = 70
+        elif z_score_val > 1.2: z_score_status = 40
         
-        floor_score = (cr_score * 0.2) + (fcf_yield_score * 0.4) + (z_score_status * 0.4)
+        floor_score = (cr_score * 0.3) + (fcf_yield_score * 0.35) + (z_score_status * 0.35)
         
         # Capitulation Intensity (40%)
-        # RSI < 20
         rsi = technicals.get('rsi')
         rsi_score = 0
         if rsi:
-            if rsi < 20: rsi_score = 100
+            if rsi < 15: rsi_score = 100
+            elif rsi < 20: rsi_score = 80
             elif rsi < 30: rsi_score = 50
             
-        # RVOL > 2.5
         rvol = technicals.get('rvol')
         rvol_score = 0
         if rvol:
-            if rvol > 2.5: rvol_score = 100
-            elif rvol > 1.5: rvol_score = 50
+            if rvol > 3.0: rvol_score = 100
+            elif rvol > 2.5: rvol_score = 80
+            elif rvol > 1.5: rvol_score = 40
             
-        # Distance from 50 SMA
         price = technicals.get('price')
         sma50 = technicals.get('sma50')
         dist_score = 0
         if price and sma50:
             dist = (price - sma50) / sma50
-            if dist < -0.20: dist_score = 100
-            elif dist < -0.10: dist_score = 50
+            if dist < -0.25: dist_score = 100
+            elif dist < -0.15: dist_score = 70
+            elif dist < -0.10: dist_score = 40
             
-        # Bollinger Band Overextension
-        lower_bb = technicals.get('lower_bb')
-        bb_score = 0
-        if price and lower_bb:
-            if price < lower_bb: bb_score = 100
-            
-        capitulation_score = (rsi_score * 0.3) + (rvol_score * 0.3) + (dist_score * 0.2) + (bb_score * 0.2)
+        capitulation_score = (rsi_score * 0.4) + (rvol_score * 0.3) + (dist_score * 0.3)
         
         v_score = (floor_score * 0.6) + (capitulation_score * 0.4)
         
         details = {
-            "FinancialFloor": {
-                "CurrentRatio": cr,
-                "FCFYield": fcf_yield,
-                "ZScore": z_score_val
-            },
-            "Capitulation": {
-                "RSI": rsi,
-                "RVOL": rvol,
-                "Dist50SMA": (price - sma50) / sma50 if price and sma50 else None,
-                "BelowLowerBB": price < lower_bb if price and lower_bb else False
+            "floor": floor_score,
+            "capitulation": capitulation_score,
+            "metrics": {
+                "ZScore": round(z_score_val, 2),
+                "FCFYield": f"{round(fcf_yield * 100, 2)}%" if fcf_yield else "N/A",
+                "RSI": round(rsi, 2) if rsi else "N/A"
             }
         }
         

@@ -1,0 +1,9 @@
+--- Verification of Retailer High-Conviction Logic ---
+Scenario 1 (Sure-Win Target): Score=90, Passes Filters=True, Fails=[]
+Scenario 2 (Alignment Fail): Passes Filters=True, Fails=[]
+Scenario 3 (Inst Fail): Passes Filters=False, Fails=['Institutional Ownership < 70%']
+Scenario 4 (Debt Fail): Passes Filters=False, Fails=['D/E Ratio >= 0.5']
+
+--- Verification of Panic/Vulture Logic ---
+Scenario 5 (Panic Triggered): Panic=True, Triggers=['Price Velocity (>15% drop in 5d)', 'Institutional Dump (RVOL: 3.0)', 'Technical Break (Price < 50 & 200 SMA)']
+Scenario 6 (Vulture Entry): Vulture=True, Fails=[], Score=75.5

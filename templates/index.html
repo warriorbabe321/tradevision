@@ -45,7 +45,7 @@
                     </div>
                     <a href="/safety_scanner" class="text-slate-500 font-bold text-sm hover:text-indigo-600 transition">Scanner</a>
                     <a href="/performance" class="text-slate-500 font-bold text-sm hover:text-indigo-600 transition">Performance</a>
-                    <button class="text-slate-500 font-bold text-sm hover:text-indigo-600 transition">Watchlist</button>
+                    <a href="#watchlist" class="text-slate-500 font-bold text-sm hover:text-indigo-600 transition">Watchlist</a>
                     <a href="/logout" class="bg-slate-900 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-800 transition">Sign Out</a>
                 </div>
             </div>
@@ -94,7 +94,7 @@
                 </div>
 
                 <!-- Central Search Bar -->
-                <div class="relative max-w-3xl mx-auto group">
+                <div class="relative max-w-3xl mx-auto group mb-4">
                     <div class="absolute inset-y-0 left-6 flex items-center pointer-events-none">
                         <svg class="h-6 w-6 text-slate-400 group-focus-within:text-indigo-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -108,6 +108,20 @@
                     </button>
                 </div>
             </form>
+
+            <div class="max-w-3xl mx-auto text-right">
+                <button onclick="toggleCompare()" class="text-xs font-bold text-slate-400 hover:text-indigo-600 transition flex items-center gap-1 ml-auto">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    Compare Multiple Stocks
+                </button>
+                <form id="compare-form" action="/compare" method="get" class="hidden mt-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-lg">
+                    <div class="flex gap-2">
+                        <input type="text" name="tickers" placeholder="Enter tickers comma-separated (e.g. AAPL,MSFT,GOOGL)" required
+                            class="flex-grow px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 text-sm">
+                        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-700 transition">Compare</button>
+                    </div>
+                </form>
+            </div>
         </section>
 
         <!-- New Core Feature: Safety Scanner Section -->
@@ -190,6 +204,39 @@
             </div>
         </section>
 
+        <!-- Watchlist Section -->
+        <section id="watchlist" class="max-w-7xl mx-auto px-4 py-16 border-b border-slate-200">
+            <div class="flex items-center justify-between mb-8">
+                <h3 class="text-slate-800 font-black text-2xl flex items-center gap-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                    My Watchlist
+                </h3>
+                <form action="/watchlist/add" method="post" class="flex gap-2">
+                    <input type="text" name="ticker" placeholder="Add Ticker" required class="px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:border-indigo-500 text-sm uppercase">
+                    <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-700 transition">Add</button>
+                </form>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-6">
+                {% if watchlist %}
+                    {% for ticker in watchlist %}
+                    <div class="p-6 bg-white border border-slate-200 rounded-3xl text-center relative group">
+                        <span class="block font-black text-2xl text-slate-800 uppercase">{{ ticker }}</span>
+                        <div class="mt-4 flex flex-col gap-2">
+                            <form action="/analyze" method="post">
+                                <input type="hidden" name="ticker" value="{{ ticker }}">
+                                <button type="submit" class="text-[10px] text-indigo-600 uppercase font-black tracking-widest hover:underline">Analyze Now</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-slate-400 text-sm font-medium col-span-full">Your watchlist is empty.</p>
+                {% endif %}
+            </div>
+        </section>
+
         <!-- Recent Reports Section -->
         <section class="max-w-7xl mx-auto px-4 py-16">
             <h3 class="text-slate-800 font-black text-2xl mb-8 flex items-center gap-3">
@@ -256,6 +303,11 @@
             const activeBtn = document.getElementById('btn-horizon-' + val.split(' ')[0].toLowerCase());
             activeBtn.classList.add('active');
             activeBtn.classList.remove('text-slate-500', 'hover:bg-slate-50');
+        }
+
+        function toggleCompare() {
+            const form = document.getElementById('compare-form');
+            form.classList.toggle('hidden');
         }
     </script>
 </body>

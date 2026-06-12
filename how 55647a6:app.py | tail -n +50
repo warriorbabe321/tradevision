@@ -6,24 +6,12 @@ from functools import wraps
 import requests
 from src.utils.db_utils import get_signals
 
-from src.analysis.scoring_engine import ScoringEngine
-from src.data_fetcher.yfinance_fetcher import YFinanceFetcher
-from src.indicators.technical import identify_hammer, identify_doji, calculate_rvol, calculate_rsi, calculate_sma
-
 app = Flask(__name__)
-
-def require_access_key(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'access_key' not in session: return redirect(url_for('login_page'))
-        return f(*args, **kwargs)
-    return decorated_function
 
 @app.after_request
 def add_header(response):
     response.headers["Content-Type"] = "text/html; charset=utf-8"
     return response
-
 app.secret_key = "tradevision-key-2026"
 
 # STEALTH MODE: Prevents rate-limiting
@@ -31,6 +19,13 @@ session_requests = requests.Session()
 session_requests.headers.update({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 })
+
+def require_access_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'access_key' not in session: return redirect(url_for('login_page'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Route to serve reports
 @app.route('/reports/<path:filename>')
@@ -44,10 +39,6 @@ def serve_report(filename):
 def dashboard():
     # Fetch real signals from DB
     signals = get_signals()
-    
-    # Fetch watchlist
-    from src.utils.db_utils import run_query
-    watchlist = run_query("SELECT ticker FROM watchlist ORDER BY added_at DESC")
     
     # Format signals for the template (it expects 'reports' with specific keys)
     reports = []
@@ -75,80 +66,82 @@ def dashboard():
             "color": "emerald",
             "last_updated": "Just now"
         },
-        "reports": reports,
-        "watchlist": [w['ticker'] for w in watchlist]
+        "reports": reports
     }
     return render_template("index.html", **context)
-
-from src.analysis.analysis_service import perform_comprehensive_analysis
-
-@app.route("/watchlist")
-@require_access_key
-def get_watchlist():
-    from src.utils.db_utils import run_query
-    watchlist = run_query("SELECT ticker FROM watchlist ORDER BY added_at DESC")
-    return {"watchlist": [w['ticker'] for w in watchlist]}
-
-@app.route("/watchlist/add", methods=["POST"])
-@require_access_key
-def add_to_watchlist():
-    ticker = request.form.get("ticker").upper()
-    from src.utils.db_utils import run_query
-    run_query(f"INSERT OR IGNORE INTO watchlist (ticker) VALUES ('{ticker}')")
-    return redirect(url_for('dashboard'))
-
-@app.route("/compare")
-@require_access_key
-def compare_stocks():
-    tickers = request.args.get("tickers", "").split(",")
-    tickers = [t.strip().upper() for t in tickers if t.strip()]
-    
-    results = []
-    for ticker in tickers:
-        res = perform_comprehensive_analysis(ticker)
-        if res: results.append(res)
-        
-    return render_template("scanner.html", stocks=results)
 
 @app.route("/analyze", methods=["POST"])
 @require_access_key
 def analyze():
     ticker = request.form.get("ticker").upper()
-    risk_level = request.form.get("risk", "Standard")
-    horizon = request.form.get("horizon", "Short Term")
-    
     try:
-        result = perform_comprehensive_analysis(ticker, risk_level=risk_level, horizon=horizon)
-        if not result: return f"No data for {ticker}"
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="1y")
+        if hist.empty: return f"No data for {ticker}"
 
-        # Logging signal
-        from src.utils.db_utils import log_signal
+        # Calculate SMAs
+        hist['SMA20'] = hist['Close'].rolling(window=20).mean()
+        hist['SMA50'] = hist['Close'].rolling(window=50).mean()
+        hist['SMA200'] = hist['Close'].rolling(window=200).mean()
+        
+        # Calculate RSI (14-period)
+        delta = hist['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        hist['RSI'] = 100 - (100 / (1 + rs))
+        
+        # Calculate MACD (12, 26, 9)
+        exp1 = hist['Close'].ewm(span=12, adjust=False).mean()
+        exp2 = hist['Close'].ewm(span=26, adjust=False).mean()
+        hist['MACD'] = exp1 - exp2
+        hist['MACD_signal'] = hist['MACD'].ewm(span=9, adjust=False).mean()
+        
+        # Get current price safely
         try:
-            log_signal(ticker, result['price'], result['status'], result['score'])
-        except Exception as log_err:
-            print(f"Logging error: {log_err}")
+            current_price = stock.fast_info.get('lastPrice') or stock.fast_info.get('regularMarketPrice')
+            if current_price is None:
+                current_price = hist['Close'].iloc[-1]
+        except Exception:
+            current_price = hist['Close'].iloc[-1]
 
-        # Generate full report for the dashboard
+        # Get SMAs with safety checks
+        def get_last_valid(series):
+            return series.iloc[-1] if not series.empty and not pd.isna(series.iloc[-1]) else 0
+
+        s20 = get_last_valid(hist['SMA20'])
+        s50 = get_last_valid(hist['SMA50'])
+        s200 = get_last_valid(hist['SMA200'])
+        
+        # Perfect Alignment Logic (Golden Zone: Price > 20 > 50 > 200)
+        is_perfect = (current_price > s20 > s50 > s200) if (s20 and s50 and s200) else False
+        
+        # Get fundamentals safely
         try:
-            from src.reporting.report_generator import generate_reports
-            import json
-            
-            report_dir = os.path.join(app.root_path, 'final_reports')
-            temp_path = f"/tmp/{ticker}_web_analysis.json"
-            
-            # Prepare data for report_generator (it might expect the old capitalized keys)
-            # Actually, let's check what report_generator expects.
-            with open(temp_path, 'w') as f:
-                json.dump(result, f)
-            generate_reports(temp_path, report_dir)
-            if os.path.exists(temp_path): os.remove(temp_path)
-        except Exception as report_err:
-            print(f"Report generation error: {report_err}")
+            info = stock.info
+            if not isinstance(info, dict): info = {}
+        except Exception:
+            info = {}
 
+        score = 0
+        if info.get('debtToEquity', 100) < 50: score += 40
+        if info.get('profitMargins', 0) > 0.10: score += 30
+        if info.get('operatingCashflow', 0) > 0: score += 30
+
+        # Determine status - Retail Gold when perfect alignment AND strong fundamentals
+        is_retail_gold = is_perfect and score >= 70
+        
+        result = {
+            "ticker": ticker,
+            "price": round(current_price, 2) if current_price else 0.0,
+            "score": score,
+            "status": "RETAIL GOLD" if is_retail_gold else "NEUTRAL",
+            "alignment": "PERFECT" if is_perfect else "UNALIGNED"
+        }
+        
         return render_template("scanner.html", stocks=[result])
     except Exception as e:
-        import traceback
-        return f"Error: {str(e)}<br><pre>{traceback.format_exc()}</pre>"
+        return f"System Busy. Try again in a moment. ({str(e)})"
 
 @app.route("/safety_scanner")
 @require_access_key
@@ -173,3 +166,7 @@ def logout():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+# Trigger deploy
+# Deploy trigger: Mon Jun  1 14:20:16 UTC 2026
+# Redeploy trigger: Mon Jun  1 21:48:27 UTC 2026
+# Redeploy trigger: Thu Jun  4 10:48:30 UTC 2026
