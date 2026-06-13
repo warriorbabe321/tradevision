@@ -16,20 +16,37 @@ class YFinanceFetcher(DataFetcher):
         """Fetch real-time stock quote using yfinance."""
         stock = yf.Ticker(ticker)
         
+        last_price = None
+        prev_close = None
+        company_name = ticker
+        
         try:
             fast = stock.fast_info
-        except Exception:
-            fast = {}
+            last_price = fast.get('lastPrice')
+            prev_close = fast.get('regularMarketPreviousClose') or fast.get('previousClose')
+        except Exception as e:
+            print(f"Fast info error for {ticker}: {e}")
             
-        last_price = fast.get('lastPrice')
-        prev_close = fast.get('regularMarketPreviousClose') or fast.get('previousClose')
-        
         # Try to get info safely
         try:
             info = stock.info
-            if not isinstance(info, dict): info = {}
-        except Exception:
-            info = {}
+            if isinstance(info, dict):
+                company_name = info.get("longName") or ticker
+                if last_price is None:
+                    last_price = info.get("currentPrice") or info.get("regularMarketPrice")
+                if prev_close is None:
+                    prev_close = info.get("previousClose")
+        except Exception as e:
+            print(f"Info error for {ticker}: {e}")
+            
+        # Fallback to history if price still missing
+        if last_price is None:
+            try:
+                hist = stock.history(period="1d")
+                if not hist.empty:
+                    last_price = hist['Close'].iloc[-1]
+            except:
+                pass
             
         change = None
         change_pct = None
@@ -39,21 +56,22 @@ class YFinanceFetcher(DataFetcher):
             
         return {
             "symbol": ticker,
-            "company_name": info.get("longName") or ticker,
+            "company_name": company_name,
             "price": last_price,
             "change": change,
             "change_percent": change_pct,
-            "volume": fast.get('lastVolume'),
+            "volume": None, # Volume is less critical for basic quote
         }
 
     def get_fundamentals(self, ticker: str) -> dict:
         """Fetch fundamental data using yfinance."""
         stock = yf.Ticker(ticker)
+        info = {}
         try:
             info = stock.info
             if not isinstance(info, dict): info = {}
-        except Exception:
-            info = {}
+        except Exception as e:
+            print(f"Fundamentals info error for {ticker}: {e}")
         
         # Calculate revenue growth if possible, or use yfinance provided one
         rev_growth = info.get("revenueGrowth")
@@ -80,13 +98,14 @@ class YFinanceFetcher(DataFetcher):
     def get_analyst_recommendations(self, ticker: str) -> dict:
         """Fetch analyst recommendations using yfinance."""
         stock = yf.Ticker(ticker)
+        info = {}
         try:
             info = stock.info
             if not isinstance(info, dict): info = {}
-        except Exception:
-            info = {}
+        except Exception as e:
+            print(f"Analyst info error for {ticker}: {e}")
         return {
-            "recommendation_key": info.get("recommendationKey"),
+            "recommendation_key": info.get("recommendationKey") or "hold",
             "recommendation_mean": info.get("recommendationMean"),
             "target_mean_price": info.get("targetMeanPrice"),
             "number_of_analyst_opinions": info.get("numberOfAnalystOpinions"),
